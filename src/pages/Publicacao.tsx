@@ -214,6 +214,46 @@ export default function Publicacao() {
 
       if (dbError) throw dbError;
 
+      // 5. Automação do Telegram
+      const savedTelegram = localStorage.getItem('@lasnoches:telegramConfig');
+      if (savedTelegram) {
+        const tgConfig = JSON.parse(savedTelegram);
+        if (tgConfig.ativo && tgConfig.token && tgConfig.chatId) {
+          try {
+            setStatusText('Enviando notificação no Telegram...');
+            
+            const routeType = obraSelecionada?.tipo === 'Novel' ? 'novel' : 'manga';
+            const safeObraNameUrl = obraSelecionada?.titulo.normalize('NFD').replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, '-').toLowerCase();
+            let finalUrl = tgConfig.siteUrl.endsWith('/') ? tgConfig.siteUrl : tgConfig.siteUrl + '/';
+            finalUrl += `${routeType}/${safeObraNameUrl}/${numero}`; 
+            
+            const msg = tgConfig.mensagem
+              .replace(/{work_name}/g, obraSelecionada?.titulo || '')
+              .replace(/{chapter_number}/g, numero)
+              .replace(/{title}/g, titulo ? `- ${titulo}` : '')
+              .replace(/{volume}/g, '')
+              .replace(/{chapter_url}/g, finalUrl);
+              
+            const payload: any = {
+              chat_id: tgConfig.chatId,
+              text: msg,
+            };
+            
+            if (tgConfig.topicId) {
+              payload.message_thread_id = tgConfig.topicId;
+            }
+            
+            await fetch(`https://api.telegram.org/bot${tgConfig.token}/sendMessage`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload)
+            });
+          } catch (err) {
+            console.error('Erro na automação do telegram:', err);
+          }
+        }
+      }
+
       setStatusText('Capítulo publicado com sucesso!');
       alert("Capítulo publicado com sucesso!");
       

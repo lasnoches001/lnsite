@@ -46,6 +46,9 @@ export default function Painel() {
     
     const savedImgbb = localStorage.getItem('@lasnoches:imgbbKeys');
     if (savedImgbb) setImgbbKeys(savedImgbb);
+    
+    const savedTelegram = localStorage.getItem('@lasnoches:telegramConfig');
+    if (savedTelegram) setTelegramConfig(JSON.parse(savedTelegram));
   }, []);
 
   const handleSalvarR2 = () => {
@@ -56,6 +59,49 @@ export default function Painel() {
   const handleSalvarImgbb = () => {
     localStorage.setItem('@lasnoches:imgbbKeys', imgbbKeys);
     alert('Chaves do ImgBB salvas com segurança!');
+  };
+
+  const handleSalvarTelegram = () => {
+    localStorage.setItem('@lasnoches:telegramConfig', JSON.stringify(telegramConfig));
+    alert('Configurações do Telegram salvas com segurança!');
+  };
+
+  const handleTesteTelegram = async () => {
+    if (!telegramConfig.token || !telegramConfig.chatId) {
+      alert("Preencha o Token e o Chat ID primeiro.");
+      return;
+    }
+    try {
+      const msg = telegramConfig.mensagem
+        .replace(/{work_name}/g, 'Obra de Teste')
+        .replace(/{chapter_number}/g, '1.0')
+        .replace(/{title}/g, 'Capítulo Piloto')
+        .replace(/{volume}/g, '1')
+        .replace(/{chapter_url}/g, telegramConfig.siteUrl);
+      
+      const payload: any = {
+        chat_id: telegramConfig.chatId,
+        text: msg,
+      };
+      
+      if (telegramConfig.topicId) {
+        payload.message_thread_id = telegramConfig.topicId;
+      }
+      
+      const res = await fetch(`https://api.telegram.org/bot${telegramConfig.token}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (data.ok) {
+        alert("Mensagem de teste enviada com sucesso pro Telegram!");
+      } else {
+        alert("Erro no Telegram: " + data.description);
+      }
+    } catch (e: any) {
+      alert("Erro ao enviar teste: " + e.message);
+    }
   };
 
   useEffect(() => {
@@ -301,10 +347,10 @@ export default function Painel() {
                 </div>
 
                 <div className="flex items-center gap-4 pt-4 border-t border-lasnoches-border mt-6">
-                  <button onClick={() => alert('Configurações do Telegram salvas visualmente!')} className="flex-1 bg-white text-black px-4 py-3 font-oswald uppercase tracking-widest hover:bg-lasnoches-cero transition-colors text-center">
+                  <button onClick={handleSalvarTelegram} className="flex-1 bg-white text-black px-4 py-3 font-oswald uppercase tracking-widest hover:bg-lasnoches-cero transition-colors text-center">
                     Salvar
                   </button>
-                  <button onClick={() => alert('Enviando mensagem de teste...')} className="flex-1 bg-lasnoches-bg border border-lasnoches-border text-white px-4 py-3 font-oswald uppercase tracking-widest hover:border-blue-400 hover:text-blue-400 transition-colors flex items-center justify-center gap-2">
+                  <button onClick={handleTesteTelegram} className="flex-1 bg-lasnoches-bg border border-lasnoches-border text-white px-4 py-3 font-oswald uppercase tracking-widest hover:border-blue-400 hover:text-blue-400 transition-colors flex items-center justify-center gap-2">
                     <Send className="w-4 h-4" /> Enviar Teste
                   </button>
                 </div>
