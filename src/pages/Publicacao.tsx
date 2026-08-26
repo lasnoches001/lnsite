@@ -205,12 +205,12 @@ export default function Publicacao() {
 
       // 4. Salvar no Supabase
       setStatusText('Salvando capítulo no banco de dados...');
-      const { error: dbError } = await supabase.from('capitulos').insert([{
+      const { data: dbData, error: dbError } = await supabase.from('capitulos').insert([{
         obra_id: parseInt(obraId),
         numero: parseFloat(numero.replace(',', '.')),
         titulo: titulo || null,
         paginas: publicUrls
-      }]);
+      }]).select();
 
       if (dbError) throw dbError;
 
@@ -222,10 +222,9 @@ export default function Publicacao() {
           try {
             setStatusText('Enviando notificação no Telegram...');
             
-            const routeType = obraSelecionada?.tipo === 'Novel' ? 'novel' : 'manga';
-            const safeObraNameUrl = obraSelecionada?.titulo.normalize('NFD').replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, '-').toLowerCase();
             let finalUrl = tgConfig.siteUrl.endsWith('/') ? tgConfig.siteUrl : tgConfig.siteUrl + '/';
-            finalUrl += `${routeType}/${safeObraNameUrl}/${numero}`; 
+            const novoCapituloId = dbData && dbData.length > 0 ? dbData[0].id : '';
+            finalUrl += `leitura/${novoCapituloId}`; 
             
             const msg = tgConfig.mensagem
               .replace(/{work_name}/g, obraSelecionada?.titulo || '')
