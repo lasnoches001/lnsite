@@ -14,6 +14,7 @@ export default function Publicacao() {
   // Estado do Formulário
   const [obraId, setObraId] = useState('');
   const [numero, setNumero] = useState('');
+  const [volume, setVolume] = useState('');
   const [titulo, setTitulo] = useState('');
   const [file, setFile] = useState<File | null>(null);
   
@@ -230,7 +231,7 @@ export default function Publicacao() {
               .replace(/{work_name}/g, obraSelecionada?.titulo || '')
               .replace(/{chapter_number}/g, numero)
               .replace(/{title}/g, titulo ? `- ${titulo}` : '')
-              .replace(/{volume}/g, '')
+              .replace(/{volume}/g, volume ? `Vol. ${volume}` : '')
               .replace(/{chapter_url}/g, finalUrl);
               
             const payload: any = {
@@ -258,6 +259,7 @@ export default function Publicacao() {
       
       // Limpar formulário
       setNumero('');
+      setVolume('');
       setTitulo('');
       setFile(null);
       
@@ -364,9 +366,19 @@ export default function Publicacao() {
             </select>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
-              <label className="block font-oswald uppercase tracking-wider text-xs text-lasnoches-textDim mb-2">Nº Capítulo</label>
+              <label className="block font-oswald uppercase tracking-wider text-xs text-lasnoches-textDim mb-2">Volume (Opcional)</label>
+              <input 
+                type="text" 
+                value={volume}
+                onChange={(e) => setVolume(e.target.value)}
+                className="w-full bg-lasnoches-surface border border-lasnoches-border text-white p-3 focus:outline-none focus:border-lasnoches-cero transition-colors" 
+                placeholder="Ex: 1" 
+              />
+            </div>
+            <div>
+              <label className="block font-oswald uppercase tracking-wider text-xs text-lasnoches-textDim mb-2">Nº Cap</label>
               <input 
                 type="number" 
                 step="0.1"
@@ -374,7 +386,7 @@ export default function Publicacao() {
                 value={numero}
                 onChange={(e) => setNumero(e.target.value)}
                 className="w-full bg-lasnoches-surface border border-lasnoches-border text-white p-3 focus:outline-none focus:border-lasnoches-cero transition-colors" 
-                placeholder="Ex: 1 ou 1.5" 
+                placeholder="Ex: 1" 
               />
             </div>
             <div>
@@ -384,7 +396,7 @@ export default function Publicacao() {
                 value={titulo}
                 onChange={(e) => setTitulo(e.target.value)}
                 className="w-full bg-lasnoches-surface border border-lasnoches-border text-white p-3 focus:outline-none focus:border-lasnoches-cero transition-colors" 
-                placeholder="Nome do capítulo" 
+                placeholder="Nome do cap" 
               />
             </div>
           </div>
