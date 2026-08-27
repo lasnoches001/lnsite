@@ -26,6 +26,77 @@ export default function Publicacao() {
   const [provider, setProvider] = useState<'r2' | 'imgbb'>('r2');
   const [tipoConteudo, setTipoConteudo] = useState<'manga' | 'novel'>('manga');
 
+  const [modo, setModo] = useState<'novo' | 'editar'>('novo');
+  const [capitulosObra, setCapitulosObra] = useState<any[]>([]);
+  const [capituloEditId, setCapituloEditId] = useState('');
+  
+  // Fetch chapters when an obra is selected in edit mode
+  useEffect(() => {
+    if (modo === 'editar' && obraId) {
+      supabase.from('capitulos').select('*').eq('obra_id', obraId).order('numero', { ascending: false }).then(({data}) => {
+        if(data) setCapitulosObra(data);
+      });
+    } else {
+      setCapitulosObra([]);
+    }
+  }, [obraId, modo]);
+
+  const handleEditSelect = (capId: string) => {
+    setCapituloEditId(capId);
+    const cap = capitulosObra.find(c => c.id === capId);
+    if (cap) {
+      setVolume(cap.volume?.toString() || '');
+      setNumero(cap.numero?.toString() || '');
+      setTitulo(cap.titulo || '');
+    } else {
+      setVolume(''); setNumero(''); setTitulo('');
+    }
+  };
+
+  const handleSalvarEdicao = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!capituloEditId || !volume || !numero) {
+      alert("Preencha volume e número do capítulo.");
+      return;
+    }
+    
+    setUploading(true);
+    setStatusText('Salvando alterações...');
+    
+    const { error } = await supabase.from('capitulos').update({
+        volume: parseFloat(volume.replace(',', '.')),
+        numero: parseFloat(numero.replace(',', '.')),
+        titulo: titulo || null,
+    }).eq('id', capituloEditId);
+    
+    if (error) {
+      alert("Erro ao atualizar: " + error.message);
+    } else {
+      alert("Capítulo atualizado com sucesso!");
+      setVolume(''); setNumero(''); setTitulo(''); setCapituloEditId('');
+      const {data} = await supabase.from('capitulos').select('*').eq('obra_id', obraId).order('numero', { ascending: false });
+      if(data) setCapitulosObra(data);
+    }
+    setUploading(false);
+  };
+
+  const handleExcluirCapitulo = async () => {
+    if(!capituloEditId) return;
+    if(confirm("Tem certeza que deseja EXCLUIR este capítulo DEFINITIVAMENTE? As imagens continuarão no R2 ocupando espaço e precisarão ser apagadas manualmente de lá, mas o capítulo sumirá do site.")) {
+       setUploading(true);
+       setStatusText('Excluindo capítulo...');
+       const {error} = await supabase.from('capitulos').delete().eq('id', capituloEditId);
+       if(error) alert("Erro: " + error.message);
+       else {
+         alert("Capítulo excluído.");
+         setVolume(''); setNumero(''); setTitulo(''); setCapituloEditId('');
+         const {data} = await supabase.from('capitulos').select('*').eq('obra_id', obraId).order('numero', { ascending: false });
+         if(data) setCapitulosObra(data);
+       }
+       setUploading(false);
+    }
+  };
+
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
@@ -60,8 +131,8 @@ export default function Publicacao() {
 
   const handlePublicar = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!obraId || !numero || !file) {
-      alert("Preencha a obra, o número do capítulo e selecione o arquivo ZIP.");
+    if (!obraId || !numero || !volume || !file) {
+      alert("Preencha a obra, volume, número do capítulo e selecione o arquivo ZIP.");
       return;
     }
 
@@ -125,21 +196,31 @@ export default function Publicacao() {
           },
         });
         
-        // 3. Fazer Upload de cada imagem para o R2
+        // 3. Fazer Upload de cada imagem para o R2 (Convertendo para WebP)
         for (let i = 0; i < imageFiles.length; i++) {
           const filename = imageFiles[i];
-          const fileData = await zipContent.files[filename].async("uint8array");
+          const fileBlob = await zipContent.files[filename].async("blob");
           
-          const extension = filename.split('.').pop()?.toLowerCase();
-          let contentType = 'image/jpeg';
-          if (extension === 'png') contentType = 'image/png';
-          if (extension === 'webp') contentType = 'image/webp';
-          if (extension === 'gif') contentType = 'image/gif';
+          setStatusText(`Convertendo e enviando página ${i + 1} de ${imageFiles.length} (R2)...`);
 
-          // Caminho no bucket: mangabname/cap_1/001.jpg
-          const objectKey = `${safeObraName}/cap_${numero}/${String(i + 1).padStart(3, '0')}.${extension}`;
+          // Conversão para WebP
+          const imageBitmap = await createImageBitmap(fileBlob);
+          const canvas = document.createElement('canvas');
+          canvas.width = imageBitmap.width;
+          canvas.height = imageBitmap.height;
+          const ctx = canvas.getContext('2d');
+          ctx?.drawImage(imageBitmap, 0, 0);
+
+          const webpBlob = await new Promise<Blob | null>(resolve => {
+            canvas.toBlob(resolve, 'image/webp', 0.90);
+          });
           
-          setStatusText(`Enviando página ${i + 1} de ${imageFiles.length} (R2)...`);
+          const fileData = webpBlob ? new Uint8Array(await webpBlob.arrayBuffer()) : await zipContent.files[filename].async("uint8array");
+          const contentType = webpBlob ? 'image/webp' : 'image/jpeg';
+          const extension = webpBlob ? 'webp' : filename.split('.').pop()?.toLowerCase();
+
+          // Caminho no bucket: mangabname/cap_1/001.webp
+          const objectKey = `${safeObraName}/cap_${numero}/${String(i + 1).padStart(3, '0')}.${extension}`;
           
           await s3.send(new PutObjectCommand({
             Bucket: r2Config.bucketName,
@@ -208,6 +289,7 @@ export default function Publicacao() {
       setStatusText('Salvando capítulo no banco de dados...');
       const { data: dbData, error: dbError } = await supabase.from('capitulos').insert([{
         obra_id: parseInt(obraId),
+        volume: parseFloat(volume.replace(',', '.')),
         numero: parseFloat(numero.replace(',', '.')),
         titulo: titulo || null,
         paginas: publicUrls
@@ -227,16 +309,16 @@ export default function Publicacao() {
             const novoCapituloId = dbData && dbData.length > 0 ? dbData[0].id : '';
             finalUrl += `leitura/${novoCapituloId}`; 
             
-            const msg = tgConfig.mensagem
+            let messageText = tgConfig.mensagem
               .replace(/{work_name}/g, obraSelecionada?.titulo || '')
-              .replace(/{chapter_number}/g, numero)
-              .replace(/{title}/g, titulo ? `- ${titulo}` : '')
-              .replace(/{volume}/g, volume ? `Vol. ${volume}` : '')
+              .replace(/{chapter_number}/g, numero || '')
+              .replace(/{title}/g, titulo || '')
+              .replace(/{volume}/g, volume || '')
               .replace(/{chapter_url}/g, finalUrl);
               
             const payload: any = {
               chat_id: tgConfig.chatId,
-              text: msg,
+              text: messageText,
             };
             
             if (tgConfig.topicId) {
@@ -291,7 +373,25 @@ export default function Publicacao() {
 
       <div className="space-y-8">
         
-        {/* Seleção de Servidor (Provider) */}
+        {/* Toggle de Modo: Novo ou Editar */}
+        <div className="flex border-b border-lasnoches-border mb-6">
+          <button 
+            type="button"
+            className={`flex-1 py-3 font-oswald uppercase tracking-widest text-sm transition-colors ${modo === 'novo' ? 'bg-white text-black font-bold' : 'bg-transparent text-lasnoches-textDim hover:text-white'}`}
+            onClick={() => { setModo('novo'); setCapituloEditId(''); setVolume(''); setNumero(''); setTitulo(''); }}
+          >
+            Publicar Novo
+          </button>
+          <button 
+            type="button"
+            className={`flex-1 py-3 font-oswald uppercase tracking-widest text-sm transition-colors ${modo === 'editar' ? 'bg-white text-black font-bold' : 'bg-transparent text-lasnoches-textDim hover:text-white'}`}
+            onClick={() => { setModo('editar'); setVolume(''); setNumero(''); setTitulo(''); }}
+          >
+            Editar / Excluir
+          </button>
+        </div>
+
+        {modo === 'novo' && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <button
             type="button"
@@ -325,9 +425,10 @@ export default function Publicacao() {
             )}
           </button>
         </div>
+        )}
 
         {/* Formulário Principal */}
-        <form onSubmit={handlePublicar} className="space-y-6">
+        <form onSubmit={modo === 'novo' ? handlePublicar : handleSalvarEdicao} className="space-y-6">
           
           <div>
             <label className="block font-oswald uppercase tracking-wider text-xs text-lasnoches-textDim mb-2">Tipo de Conteúdo</label>
@@ -367,10 +468,27 @@ export default function Publicacao() {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {modo === 'editar' && obraId && (
+              <div className="col-span-1 md:col-span-3">
+                <label className="block font-oswald uppercase tracking-wider text-xs text-lasnoches-textDim mb-2">Selecione o Capítulo para Editar</label>
+                <select 
+                  value={capituloEditId}
+                  onChange={(e) => handleEditSelect(e.target.value)}
+                  className="w-full bg-lasnoches-surface border border-lasnoches-border text-white p-3 focus:outline-none focus:border-lasnoches-cero transition-colors"
+                >
+                  <option value="">Escolha o capítulo...</option>
+                  {capitulosObra.map(cap => (
+                    <option key={cap.id} value={cap.id}>Vol. {cap.volume || '?'} - Cap. {cap.numero} {cap.titulo ? `(${cap.titulo})` : ''}</option>
+                  ))}
+                </select>
+              </div>
+            )}
             <div>
-              <label className="block font-oswald uppercase tracking-wider text-xs text-lasnoches-textDim mb-2">Volume (Opcional)</label>
+              <label className="block font-oswald uppercase tracking-wider text-xs text-lasnoches-textDim mb-2">Volume</label>
               <input 
-                type="text" 
+                type="number" 
+                step="0.1"
+                required
                 value={volume}
                 onChange={(e) => setVolume(e.target.value)}
                 className="w-full bg-lasnoches-surface border border-lasnoches-border text-white p-3 focus:outline-none focus:border-lasnoches-cero transition-colors" 
@@ -401,11 +519,12 @@ export default function Publicacao() {
             </div>
           </div>
 
+          {modo === 'novo' && (
           <div className="relative border-2 border-dashed border-lasnoches-border p-12 flex flex-col items-center justify-center text-center cursor-pointer hover:border-lasnoches-cero hover:bg-lasnoches-surface transition-all group">
             <input 
               type="file" 
               accept=".zip" 
-              required
+              required={modo === 'novo'}
               onChange={handleFileChange}
               className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" 
               disabled={uploading}
@@ -418,6 +537,7 @@ export default function Publicacao() {
               Contendo as imagens soltas ou em pastas. Serão ordenadas por nome automaticamente.
             </p>
           </div>
+          )}
 
           {uploading && (
             <div className="w-full bg-lasnoches-surface border border-lasnoches-border p-4">
@@ -431,13 +551,25 @@ export default function Publicacao() {
             </div>
           )}
 
-          <button 
-            type="submit" 
-            disabled={uploading}
-            className="w-full bg-white text-black font-oswald uppercase tracking-widest py-4 hover:bg-lasnoches-cero transition-colors text-lg flex justify-center items-center gap-3 disabled:opacity-50"
-          >
-            {uploading ? <Loader2 className="w-6 h-6 animate-spin" /> : 'Publicar Capítulo'}
-          </button>
+          <div className="flex gap-4">
+            <button 
+              type="submit" 
+              disabled={uploading}
+              className="flex-1 bg-white text-black font-oswald uppercase tracking-widest py-4 hover:bg-lasnoches-cero transition-colors text-lg flex justify-center items-center gap-3 disabled:opacity-50"
+            >
+              {uploading ? <Loader2 className="w-6 h-6 animate-spin" /> : (modo === 'novo' ? 'Publicar Capítulo' : 'Salvar Alterações')}
+            </button>
+            {modo === 'editar' && capituloEditId && (
+              <button 
+                type="button"
+                onClick={handleExcluirCapitulo}
+                disabled={uploading}
+                className="bg-lasnoches-blood text-white font-oswald uppercase tracking-widest px-8 py-4 hover:bg-red-600 transition-colors text-lg flex justify-center items-center gap-3 disabled:opacity-50"
+              >
+                Excluir
+              </button>
+            )}
+          </div>
         </form>
 
       </div>
